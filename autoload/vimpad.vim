@@ -167,7 +167,12 @@ function! s:build_output(line) "{{{
 endfunction "}}}
 
 function! s:off() abort "{{{
-  call nvim_buf_clear_namespace(0, g:vimpad.id, 0, -1)
+  if has('nvim')
+    call nvim_buf_clear_namespace(0, g:vimpad.id, 0, -1)
+  else
+    call prop_remove('VimpadOutput', 1, line('$'))
+    call prop_remove('VimpadOutputError', 1, line('$'))
+  endif
 
   let g:vimpad.id = 0
 endfunction "}}}
@@ -188,7 +193,11 @@ function! s:on() abort "{{{
       let source = 'silent ' . previous_line . ',' . (line.lnum + 1) . 'source'
       exec source
 
-      let output = nvim_exec(line.text, 1)
+      if has('nvim')
+        let output = nvim_exec(line.text, 1)
+      else
+        let output = execute(line.text)
+      endif
       let error = 0
     catch /.*/
       " store the exception msg
@@ -207,19 +216,37 @@ function! s:on() abort "{{{
   " removes lines if output is empty string
   call filter(lines, 'v:val.output != ""')
 
-  let g:vimpad.id = nvim_create_namespace('vimpad')
+  if has('nvim')
+    let g:vimpad.id = nvim_create_namespace('vimpad')
+  elseif empty(prop_type_get('VimpadOutput', {'bufnr': bufnr()}))
+    call prop_type_add('VimpadOutput',      {'bufnr': bufnr(), 'highlight': 'VimpadOutput'})
+    call prop_type_add('VimpadOutputError', {'bufnr': bufnr(), 'highlight': 'VimpadOutputError'})
+  endif
 
   let bufnr = 0
   for line in lines
     let output = s:build_output(line)
 
-    " nvim_buf_set_virtual_text({buffer}, {src_id}, {line}, {chunks}, {opts})
-    call nvim_buf_set_virtual_text(
-          \bufnr, 
-          \g:vimpad.id, 
-          \line.lnum, 
-          \output,
-          \{})
+    if has('nvim')
+      " nvim_buf_set_virtual_text({buffer}, {src_id}, {line}, {chunks}, {opts})
+      call nvim_buf_set_virtual_text(
+            \bufnr,
+            \g:vimpad.id,
+            \line.lnum,
+            \output,
+            \{})
+    else
+      let [text, hl] = output[0]
+      let padding = g:vimpad.padding_count + 1
+
+      " prop_add({lnum}, {col}, {props})
+      call prop_add(line.lnum + 1, 0, {
+            \'type': hl,
+            \'text_align': 'after',
+            \'text_padding_left': padding,
+            \'text': text,
+            \})
+    endif
   endfor
 
 endfunction "}}}
@@ -228,7 +255,11 @@ function! s:execute() abort
   let lines = s:get_visual_selection()
   let outputs = []
   try
-    let output = nvim_exec(lines, 1)
+    if has('nvim')
+      let output = nvim_exec(lines, 1)
+    else
+      let output = trim(execute(lines))
+    endif
     let outputs = split(output, "\n")
     let num = 0
     let lines = []
